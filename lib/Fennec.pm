@@ -7,7 +7,7 @@ BEGIN { require Fennec::Runner }
 use Fennec::Test;
 use Fennec::Util qw/inject_sub require_module verbose_message/;
 use Carp qw/croak carp/;
-our $VERSION = '2.005';
+our $VERSION = '2.010';
 
 sub defaults {
     (
@@ -46,6 +46,9 @@ sub import {
     $defaults{runner_class} ||= 'Fennec::Runner';
     my %params = ( %defaults, @_ );
 
+    $ENV{FENNEC_SEED}  ||= $params{seed}  if $params{seed};
+    $ENV{FENNEC_DEBUG} ||= $params{debug} if $params{debug};
+
     my ( $runner, $runner_init ) = $class->_get_runner(
         $importer,
         $defaults{runner_class},
@@ -62,6 +65,24 @@ sub import {
     $class->_process_deps( $runner, $params{skip_without} );
     $class->_set_isa( $importer, 'Fennec::Test', $meta->base );
     $class->_load_utils( $importer, %params );
+
+    # Intercept Mock::Quick mocks
+    my $wfmeta = $importer->TEST_WORKFLOW;
+    if ( $wfmeta && grep { $_ eq 'Mock::Quick' } @{$defaults{utils} || []}) {
+        my $intercept = sub {
+            my ($code) = @_;
+            my @caller = caller;
+
+            my $store = $wfmeta->control_store;
+            return push @$store => $code->() if $store;
+
+            my $layer = $wfmeta->peek_layer || $wfmeta->root_layer;
+            $layer->add_control($code);
+        };
+        no strict 'refs';
+        *{"$importer\::QINTERCEPT"} = sub{ $intercept };
+    }
+
     $class->_with_tests( $importer, $params{with_tests} );
     $class->init( %params, importer => $importer, meta => $meta );
 
@@ -284,7 +305,7 @@ t/some_test.t:
 =head2 DECLARE SYNTAX
 
 B<Note:> In order to use this you B<MUST> install L<Fennec::Declare> which is a
-seperate distribution on cpan. This module is seperate because it uses the
+separate distribution on cpan. This module is separate because it uses the
 controversial L<Devel::Declare> module.
 
 t/some_test.t:
@@ -427,7 +448,7 @@ I<Provided by Mock::Quick>
 
 =head1 DEFAULT IMPORTED MODULES
 
-B<Note:> These can be overriden either on import, or by subclassing Fennec.
+B<Note:> These can be overridden either on import, or by subclassing Fennec.
 
 =over 4
 
@@ -538,6 +559,35 @@ use the class name as the key with an arrayref containing the arguments.
 
 Load these modules that have reusable tests. Reusable tests are tests that are
 common to multiple test files.
+
+=item seed => '...'
+
+Set the random seed to be used. Defaults to current date, can be overridden by
+the FENNEC_SEED environment variable.
+
+=item debug => $BOOL
+
+Can be used to turn on internal debugging for Fennec. This currently does very
+little.
+
+=back
+
+=head1 ENVIRONMENT VARIABLES
+
+=over 4
+
+=item FENNEC_SEED
+
+Can be used to set a specific random seed
+
+=item FENNEC_TEST
+
+Can be used to tell Fennec to only run specific tests (can be given a line
+number or a block name).
+
+=item FENNEC_DEBUG
+
+When true internal debugging is turned on.
 
 =back
 
@@ -842,6 +892,57 @@ See L<Mock::Quick> for more details
     lives_ok { $obj->blah( 'x' ) };
 
     # use qstrict() to make an object that does not autovivify accessors.
+
+=head3 SCOPE OF MOCKS IN FENNEC
+
+With vanilla L<Mock::Quick> a mock is destroyed when the control object is destroyed.
+
+    my $control = qtakeover Foo => (blah => 'blah');
+    is( Foo->blah, 'blah', "got mock" );
+    $control = undef;
+    ok( !Foo->can('blah'), "Mock destroyed" );
+
+    # WITHOUT FENNEC This issues a warning, the $control object is ignored so
+    # the mock is destroyed before it can be used.
+    qtakover Foo => (blah => 'blah');
+    ok( !Foo->can('blah'), "Mock destroyed before it could be used" );
+
+With the workflow support provided by Fennec, you can omit the control object
+and let the mock be scoped implicitly.
+
+    tests implicit_mock_scope => sub {
+        my $self = shift;
+        can_ok( $self, 'QINTERCEPT' );
+        qtakeover Foo => (blah => sub { 'blah' });
+        is( Foo->blah, 'blah', "Mock not auto-destroyed" );
+    };
+
+    describe detailed_implicit_mock_scope => sub {
+        qtakeover Foo => ( outer => 'outer' );
+        ok( !Foo->can( 'outer' ), "No Leak" );
+
+        before_all ba => sub {
+            qtakeover Foo => ( ba => 'ba' );
+            can_ok( 'Foo', qw/outer ba/ );
+        };
+
+        before_each be => sub {
+            qtakeover Foo => ( be => 'be' );
+            can_ok( 'Foo', qw/outer ba be/ );
+        };
+
+        tests the_check => sub {
+            qtakeover Foo => ( inner => 'inner' );
+
+            can_ok( 'Foo', qw/outer ba be inner/ );
+        };
+
+        ok( !Foo->can( 'outer' ), "No Leak" );
+        ok( !Foo->can( 'ba' ), "No Leak" );
+        ok( !Foo->can( 'be' ), "No Leak" );
+        ok( !Foo->can( 'inner' ), "No Leak" );
+    };
+
 
 =head3 TAKEOVER AN EXISTING CLASS
 

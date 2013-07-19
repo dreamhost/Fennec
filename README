@@ -45,7 +45,7 @@ SYNOPSYS
 
   DECLARE SYNTAX
     Note: In order to use this you MUST install Fennec::Declare which is a
-    seperate distribution on cpan. This module is seperate because it uses
+    separate distribution on cpan. This module is separate because it uses
     the controversial Devel::Declare module.
 
     t/some_test.t: package TEST::SomeTest; use strict; use warnings;
@@ -164,7 +164,7 @@ FEATURES
         *Provided by Mock::Quick*
 
 DEFAULT IMPORTED MODULES
-    Note: These can be overriden either on import, or by subclassing Fennec.
+    Note: These can be overridden either on import, or by subclassing Fennec.
 
     Child - Forking for dummies
         Child is an OO interface to forking that removes all the
@@ -259,6 +259,25 @@ IMPORT ARGUMENTS
     with_tests => [ 'Reusable::Tests', 'Common::Tests' ]
         Load these modules that have reusable tests. Reusable tests are
         tests that are common to multiple test files.
+
+    seed => '...'
+        Set the random seed to be used. Defaults to current date, can be
+        overridden by the FENNEC_SEED environment variable.
+
+    debug => $BOOL
+        Can be used to turn on internal debugging for Fennec. This currently
+        does very little.
+
+ENVIRONMENT VARIABLES
+    FENNEC_SEED
+        Can be used to set a specific random seed
+
+    FENNEC_TEST
+        Can be used to tell Fennec to only run specific tests (can be given
+        a line number or a block name).
+
+    FENNEC_DEBUG
+        When true internal debugging is turned on.
 
 EXPORTED FUNCTIONS
   FROM FENNEC
@@ -499,6 +518,56 @@ EXAMPLES
         lives_ok { $obj->blah( 'x' ) };
 
         # use qstrict() to make an object that does not autovivify accessors.
+
+   SCOPE OF MOCKS IN FENNEC
+    With vanilla Mock::Quick a mock is destroyed when the control object is
+    destroyed.
+
+        my $control = qtakeover Foo => (blah => 'blah');
+        is( Foo->blah, 'blah', "got mock" );
+        $control = undef;
+        ok( !Foo->can('blah'), "Mock destroyed" );
+
+        # WITHOUT FENNEC This issues a warning, the $control object is ignored so
+        # the mock is destroyed before it can be used.
+        qtakover Foo => (blah => 'blah');
+        ok( !Foo->can('blah'), "Mock destroyed before it could be used" );
+
+    With the workflow support provided by Fennec, you can omit the control
+    object and let the mock be scoped implicitly.
+
+        tests implicit_mock_scope => sub {
+            my $self = shift;
+            can_ok( $self, 'QINTERCEPT' );
+            qtakeover Foo => (blah => sub { 'blah' });
+            is( Foo->blah, 'blah', "Mock not auto-destroyed" );
+        };
+
+        describe detailed_implicit_mock_scope => sub {
+            qtakeover Foo => ( outer => 'outer' );
+            ok( !Foo->can( 'outer' ), "No Leak" );
+
+            before_all ba => sub {
+                qtakeover Foo => ( ba => 'ba' );
+                can_ok( 'Foo', qw/outer ba/ );
+            };
+
+            before_each be => sub {
+                qtakeover Foo => ( be => 'be' );
+                can_ok( 'Foo', qw/outer ba be/ );
+            };
+
+            tests the_check => sub {
+                qtakeover Foo => ( inner => 'inner' );
+
+                can_ok( 'Foo', qw/outer ba be inner/ );
+            };
+
+            ok( !Foo->can( 'outer' ), "No Leak" );
+            ok( !Foo->can( 'ba' ), "No Leak" );
+            ok( !Foo->can( 'be' ), "No Leak" );
+            ok( !Foo->can( 'inner' ), "No Leak" );
+        };
 
    TAKEOVER AN EXISTING CLASS
         require Some::Class;

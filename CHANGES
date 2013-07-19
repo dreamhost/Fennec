@@ -1,3 +1,13 @@
+V2.009 - Better mocking scoping
+ * Make it so that Mock::Quick control objects can be implicitly captured by
+   Fennec scopes.
+
+V2.008 - Supress messages on syntax check
+
+V2.007 - Supress never run message on syntax check
+
+V2.002-V2.006 - Minor Bugfixes
+
 V2.001 - May 18 2013
     * Add 'class' import argument
 
@@ -19,7 +29,7 @@ v1.014 - May 07 2013
 v1.013 - May 06 2013
     * Add 2 test files for badly broken behavior
     * Fixed broken behavior
-     * Nested test structures did not run in proper seperate procs
+     * Nested test structures did not run in proper separate procs
      * test_sort => 'ordered' did not run any tests
 
 vXXXX - Lots
